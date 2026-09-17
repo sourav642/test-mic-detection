@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Strong Blow Detection</title>
+    <title>Perfect Blow Detection</title>
     <style>
         body { 
             font-family: system-ui, sans-serif; 
@@ -25,24 +25,22 @@
         }
         button:hover { background: #005bb5; transform: scale(1.05); }
 
-        /* The inline flex container */
         #status-container {
             display: none; 
             align-items: center; 
             justify-content: center; 
             gap: 12px; 
             margin-top: 30px;
-            height: 40px; /* Keeps the layout stable when the ring expands */
+            height: 40px; 
         }
 
         #status { 
             font-size: 1.1rem; 
             color: #555; 
-            text-transform: lowercase; /* forces small letters */
+            text-transform: lowercase; 
             font-weight: 500;
         }
         
-        /* The smaller inline visualizer */
         #ring { 
             width: 16px; 
             height: 16px; 
@@ -85,7 +83,7 @@
                 stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
                 
                 startBtn.style.display = 'none';
-                statusContainer.style.display = 'flex'; // Show the inline UI
+                statusContainer.style.display = 'flex';
                 statusText.textContent = "calibrating room... shhh 🤫";
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -120,25 +118,28 @@
                     }
 
                     if (elapsed >= 1200 && statusText.textContent.includes("calibrating")) {
-                        statusText.textContent = "ready! give it a strong, loud blow! 💨";
+                        statusText.textContent = "ready! give it a deliberate, strong puff 💨";
                     }
 
-                    // Scale the tiny ring slightly based on breathing/noise
                     ring.style.transform = `scale(${1 + (currentBass / 150)})`;
 
-                    // --- STRICTER, LOUDER RULES ---
-                    // A: Spike must be massive (+80 above room noise)
-                    const isSuddenSpike = currentBass > (baselineBass + 80);
-                    // B: Must be exclusively wind (Bass +80 over Treble)
-                    const isExclusivelyWind = currentBass > (currentTreble + 80);
-                    // C: Must hit a much higher absolute volume (160 instead of 80)
-                    const isLoudEnough = currentBass > 160;
+                    // --- THE GOLDILOCKS RULES ---
+                    // A: Must be a clear jump over ambient room/fan noise (+65)
+                    const isSuddenSpike = currentBass > (baselineBass + 65);
+                    
+                    // B: Must be purer wind (+60 over Treble). 
+                    // This specifically blocks heavy breathing, which has raspy high frequencies.
+                    const isExclusivelyWind = currentBass > (currentTreble + 60);
+                    
+                    // C: The Sweet Spot absolute volume (140). 
+                    // 120 was too easy, 160 required shouting.
+                    const isLoudEnough = currentBass > 140;
 
                     if (isSuddenSpike && isExclusivelyWind && isLoudEnough) {
                         consecutiveBlowFrames++; 
                         
-                        // Require 7 frames (~115ms) to ensure it's a deep, sustained blow, not a puff
-                        if (consecutiveBlowFrames >= 7) {
+                        // Require 6 frames (~100ms) to ensure it's an intentional stream of air
+                        if (consecutiveBlowFrames >= 6) {
                             triggerSuccess();
                             return; 
                         }
@@ -161,7 +162,7 @@
         });
 
         function triggerSuccess() {
-            statusText.textContent = "🎉 nailed it! strong blow detected!";
+            statusText.textContent = "🎉 nailed it!";
             statusText.classList.add('success-text');
             ring.classList.add('success-ring');
 
