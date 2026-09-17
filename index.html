@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accurate Blow Detection</title>
+    <title>Raw Audio Blow Detection</title>
     <style>
         body { font-family: system-ui, sans-serif; text-align: center; margin-top: 20vh; }
         #status { font-size: 1.5rem; margin-top: 20px; font-weight: bold; color: #555; }
+        #debug { font-family: monospace; color: #888; margin-top: 15px; font-size: 1rem; }
         button { padding: 12px 24px; font-size: 1.1rem; cursor: pointer; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
         button:hover { background: #e0e0e0; }
         .success { color: #4CAF50 !important; }
@@ -16,25 +17,34 @@
 
     <button id="start-btn">Enable Microphone</button>
     <div id="status">Waiting for permission...</div>
+    <div id="debug"></div>
 
     <script>
         const startBtn = document.getElementById('start-btn');
         const statusText = document.getElementById('status');
+        const debugText = document.getElementById('debug');
         
         let audioContext;
         let stream;
         let animationId;
-        
-        // Track how long the blow lasts
         let consecutiveBlowFrames = 0;
 
         startBtn.addEventListener('click', async () => {
             try {
-                statusText.textContent = "Requesting permission...";
+                statusText.textContent = "Requesting raw audio permission...";
                 
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // CRUCIAL FIX: Tell the browser NOT to filter out wind/background noise
+                const audioConstraints = {
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                };
+
+                stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
                 startBtn.style.display = 'none';
-                statusText.textContent = "Listening... Please blow into the mic! 💨";
+                statusText.textContent = "Listening... Blow into the mic! 💨";
 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const microphone = audioContext.createMediaStreamSource(stream);
@@ -49,26 +59,23 @@
                 function checkVolume() {
                     analyser.getByteFrequencyData(dataArray);
 
-                    // dataArray[0] = Deep bass / Wind rumble (0-170Hz)
-                    // dataArray[20] = Mid-High frequencies / Talking / Noise (around 3.5kHz)
                     const lowFreqVolume = dataArray[0]; 
                     const highFreqVolume = dataArray[20]; 
 
-                    // ACCURACY CHECK:
-                    // 1. Is the bass/wind extremely loud? (> 180)
-                    // 2. Is it mostly just wind? (low frequency must be way louder than high frequency)
-                    if (lowFreqVolume > 180 && (lowFreqVolume - highFreqVolume > 100)) {
+                    // Show live numbers on screen so you can see what the mic hears
+                    debugText.textContent = `Live Bass: ${lowFreqVolume} | High pitch: ${highFreqVolume}`;
+
+                    // Relaxed the thresholds slightly in case your mic volume is naturally low
+                    if (lowFreqVolume > 130 && (lowFreqVolume - highFreqVolume > 50)) {
                         
-                        consecutiveBlowFrames++; // Count how long they have been blowing
+                        consecutiveBlowFrames++; 
                         
-                        // Require the blow to last for ~250 milliseconds (15 frames)
-                        // This prevents desk bumps or popping "P" words from triggering it
-                        if (consecutiveBlowFrames > 15) {
+                        // Lowered to 10 frames (~160ms) so you don't run out of breath
+                        if (consecutiveBlowFrames > 10) {
                             triggerSuccess();
                             return; 
                         }
                     } else {
-                        // If they stop blowing, or background noise interrupts, reset the counter
                         consecutiveBlowFrames = 0;
                     }
 
@@ -86,6 +93,7 @@
         function triggerSuccess() {
             statusText.textContent = "🎉 Blow Detected! (Mic stopped)";
             statusText.classList.add('success');
+            debugText.textContent = "Processing stopped.";
 
             cancelAnimationFrame(animationId);
             
