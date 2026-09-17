@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accurate Blow Detection</title>
+    <style>
+        body { font-family: system-ui, sans-serif; text-align: center; margin-top: 20vh; }
+        #status { font-size: 1.5rem; margin-top: 20px; font-weight: bold; color: #555; }
+        button { padding: 12px 24px; font-size: 1.1rem; cursor: pointer; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+        button:hover { background: #e0e0e0; }
+        .success { color: #4CAF50 !important; }
+    </style>
+</head>
+<body>
+
+    <button id="start-btn">Enable Microphone</button>
+    <div id="status">Waiting for permission...</div>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const statusText = document.getElementById('status');
+        
+        let audioContext;
+        let stream;
+        let animationId;
+        
+        // Track how long the blow lasts
+        let consecutiveBlowFrames = 0;
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                statusText.textContent = "Requesting permission...";
+                
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                startBtn.style.display = 'none';
+                statusText.textContent = "Listening... Please blow into the mic! 💨";
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                const analyser = audioContext.createAnalyser();
+                
+                analyser.smoothingTimeConstant = 0.2; 
+                analyser.fftSize = 256; 
+                
+                microphone.connect(analyser);
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                function checkVolume() {
+                    analyser.getByteFrequencyData(dataArray);
+
+                    // dataArray[0] = Deep bass / Wind rumble (0-170Hz)
+                    // dataArray[20] = Mid-High frequencies / Talking / Noise (around 3.5kHz)
+                    const lowFreqVolume = dataArray[0]; 
+                    const highFreqVolume = dataArray[20]; 
+
+                    // ACCURACY CHECK:
+                    // 1. Is the bass/wind extremely loud? (> 180)
+                    // 2. Is it mostly just wind? (low frequency must be way louder than high frequency)
+                    if (lowFreqVolume > 180 && (lowFreqVolume - highFreqVolume > 100)) {
+                        
+                        consecutiveBlowFrames++; // Count how long they have been blowing
+                        
+                        // Require the blow to last for ~250 milliseconds (15 frames)
+                        // This prevents desk bumps or popping "P" words from triggering it
+                        if (consecutiveBlowFrames > 15) {
+                            triggerSuccess();
+                            return; 
+                        }
+                    } else {
+                        // If they stop blowing, or background noise interrupts, reset the counter
+                        consecutiveBlowFrames = 0;
+                    }
+
+                    animationId = requestAnimationFrame(checkVolume);
+                }
+
+                checkVolume();
+
+            } catch (err) {
+                console.error("Mic error:", err);
+                statusText.textContent = "Microphone access denied.";
+            }
+        });
+
+        function triggerSuccess() {
+            statusText.textContent = "🎉 Blow Detected! (Mic stopped)";
+            statusText.classList.add('success');
+
+            cancelAnimationFrame(animationId);
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+        }
+    </script>
+</body>
+</html>
