@@ -3,80 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Strict Blow Detection</title>
+    <title>High-Accuracy Blow Detection</title>
     <style>
-        body { font-family: system-ui, sans-serif; text-align: center; margin-top: 20vh; }
-        #status { font-size: 1.5rem; margin-top: 20px; font-weight: bold; color: #555; }
-        button { padding: 12px 24px; font-size: 1.1rem; cursor: pointer; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
-        button:hover { background: #e0e0e0; }
-        .success { color: #4CAF50 !important; }
+        body { font-family: system-ui, sans-serif; text-align: center; margin-top: 15vh; background: #fafafa; }
+        #status { font-size: 1.5rem; margin-top: 20px; font-weight: bold; color: #444; height: 30px; }
+        
+        /* The visualizer so the user knows the mic is working */
+        #ring { 
+            width: 100px; height: 100px; 
+            border-radius: 50%; 
+            background: #e0e0e0; 
+            margin: 40px auto; 
+            transition: transform 0.05s ease-out, background-color 0.2s;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        
+        button { padding: 14px 28px; font-size: 1.2rem; cursor: pointer; border-radius: 50px; border: none; background: #007AFF; color: white; box-shadow: 0 4px 12px rgba(0,122,255,0.3); transition: 0.2s; }
+        button:hover { background: #005bb5; transform: scale(1.05); }
+        .success-text { color: #4CAF50 !important; }
+        .success-ring { background: #4CAF50 !important; transform: scale(1.5) !important; }
     </style>
 </head>
 <body>
 
     <button id="start-btn">Enable Microphone</button>
-    <div id="status">Waiting for permission...</div>
+    <div id="ring" style="display: none;"></div>
+    <div id="status"></div>
 
     <script>
         const startBtn = document.getElementById('start-btn');
         const statusText = document.getElementById('status');
+        const ring = document.getElementById('ring');
         
-        let audioContext;
-        let stream;
-        let animationId;
-        
+        let audioContext, stream, animationId;
         let consecutiveBlowFrames = 0;
+        let startTime = 0;
+        let baselineBass = 0;
 
         startBtn.addEventListener('click', async () => {
             try {
-                // Must disable suppression so the browser doesn't block the clipping
                 const audioConstraints = {
-                    audio: {
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false
-                    }
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
                 };
 
                 stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
                 
                 startBtn.style.display = 'none';
-                statusText.textContent = "Listening... Give it a SHARP, solid blow! 💨";
+                ring.style.display = 'block';
+                statusText.textContent = "Calibrating room... Shhh 🤫";
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const microphone = audioContext.createMediaStreamSource(stream);
                 const analyser = audioContext.createAnalyser();
                 
-                analyser.smoothingTimeConstant = 0.1; // Highly responsive
+                analyser.smoothingTimeConstant = 0.1; 
                 analyser.fftSize = 256; 
                 
                 microphone.connect(analyser);
                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
+                startTime = Date.now();
+
                 function checkVolume() {
                     analyser.getByteFrequencyData(dataArray);
 
-                    const currentBass = dataArray[0]; // Deep rumble
-                    const highFreq = dataArray[20];   // High pitch (voice/noise)
+                    // 1. ADVANCED AVERAGING
+                    // Average the first 3 bins (0-250Hz) for true wind rumble
+                    let bassSum = 0;
+                    for(let i = 0; i <= 2; i++) bassSum += dataArray[i];
+                    const currentBass = bassSum / 3;
 
-                    // STRICT RULES:
-                    // 1. Max volume is 255. A sharp blow must overload the mic (> 230).
-                    // 2. High frequencies must stay relatively quiet (< 100), meaning they aren't yelling.
-                    const isExtremeClipping = currentBass > 230;
-                    const isNotYelling = highFreq < 100;
+                    // Average bins 15 to 30 (1.5kHz - 3kHz) for human voice / clapping
+                    let trebleSum = 0;
+                    for(let i = 15; i <= 30; i++) trebleSum += dataArray[i];
+                    const currentTreble = trebleSum / 16;
 
-                    if (isExtremeClipping && isNotYelling) {
+                    // 2. HARDWARE SETTLE & BASELINE CALIBRATION (1.2 seconds)
+                    const elapsed = Date.now() - startTime;
+                    if (elapsed < 1200) {
+                        // Slowly build a baseline of the room's normal background fan/hum noise
+                        baselineBass = (baselineBass * 0.9) + (currentBass * 0.1);
+                        
+                        // Small visual feedback so they know mic is active
+                        ring.style.transform = `scale(${1 + (currentTreble / 500)})`; 
+                        
+                        animationId = requestAnimationFrame(checkVolume);
+                        return;
+                    }
+
+                    // Tell the user it's ready
+                    if (elapsed >= 1200 && statusText.textContent.includes("Calibrating")) {
+                        statusText.textContent = "Ready! Give it a sharp blow! 💨";
+                    }
+
+                    // Make the ring pulse slightly to their background noise
+                    ring.style.transform = `scale(${1 + (currentBass / 300)})`;
+
+                    // 3. THE 90% ACCURACY RULES:
+                    // Rule A: Must be a sudden spike (+50 above room baseline)
+                    const isSuddenSpike = currentBass > (baselineBass + 50);
+                    // Rule B: Must be exclusively wind (Bass is at least 50 points louder than Treble)
+                    const isExclusivelyWind = currentBass > (currentTreble + 50);
+                    // Rule C: Must be reasonably loud (Protects against ultra-quiet room glitches)
+                    const isLoudEnough = currentBass > 80;
+
+                    if (isSuddenSpike && isExclusivelyWind && isLoudEnough) {
                         consecutiveBlowFrames++; 
                         
-                        // Require this max-volume state to hold for ~100 milliseconds (6 frames)
-                        // This prevents quick pops or hitting the desk from triggering it.
-                        if (consecutiveBlowFrames > 6) {
+                        // Require this state for ~80ms (5 frames). 
+                        // Long enough to ignore desk bumps, short enough to catch quick puffs.
+                        if (consecutiveBlowFrames >= 5) {
                             triggerSuccess();
                             return; 
                         }
                     } else {
-                        // The moment the pressure drops, reset to 0
+                        // Reset instantly if the air pressure drops
                         consecutiveBlowFrames = 0;
+                        
+                        // Keep adjusting the background noise floor if it gets quiet
+                        if (currentBass < baselineBass + 20) {
+                            baselineBass = (baselineBass * 0.98) + (currentBass * 0.02);
+                        }
                     }
 
                     animationId = requestAnimationFrame(checkVolume);
@@ -91,8 +138,9 @@
         });
 
         function triggerSuccess() {
-            statusText.textContent = "🎉 Solid Blow Detected!";
-            statusText.classList.add('success');
+            statusText.textContent = "🎉 Nailed it! Blow Detected!";
+            statusText.classList.add('success-text');
+            ring.classList.add('success-ring');
 
             cancelAnimationFrame(animationId);
             
