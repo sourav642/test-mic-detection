@@ -3,35 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High-Accuracy Blow Detection</title>
+    <title>Strong Blow Detection</title>
     <style>
-        body { font-family: system-ui, sans-serif; text-align: center; margin-top: 15vh; background: #fafafa; }
-        #status { font-size: 1.5rem; margin-top: 20px; font-weight: bold; color: #444; height: 30px; }
-        
-        /* The visualizer so the user knows the mic is working */
-        #ring { 
-            width: 100px; height: 100px; 
-            border-radius: 50%; 
-            background: #e0e0e0; 
-            margin: 40px auto; 
-            transition: transform 0.05s ease-out, background-color 0.2s;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        body { 
+            font-family: system-ui, sans-serif; 
+            text-align: center; 
+            margin-top: 15vh; 
+            background: #fafafa; 
         }
         
-        button { padding: 14px 28px; font-size: 1.2rem; cursor: pointer; border-radius: 50px; border: none; background: #007AFF; color: white; box-shadow: 0 4px 12px rgba(0,122,255,0.3); transition: 0.2s; }
+        button { 
+            padding: 12px 24px; 
+            font-size: 1.1rem; 
+            cursor: pointer; 
+            border-radius: 50px; 
+            border: none; 
+            background: #007AFF; 
+            color: white; 
+            box-shadow: 0 4px 12px rgba(0,122,255,0.3); 
+            transition: 0.2s; 
+        }
         button:hover { background: #005bb5; transform: scale(1.05); }
-        .success-text { color: #4CAF50 !important; }
-        .success-ring { background: #4CAF50 !important; transform: scale(1.5) !important; }
+
+        /* The inline flex container */
+        #status-container {
+            display: none; 
+            align-items: center; 
+            justify-content: center; 
+            gap: 12px; 
+            margin-top: 30px;
+            height: 40px; /* Keeps the layout stable when the ring expands */
+        }
+
+        #status { 
+            font-size: 1.1rem; 
+            color: #555; 
+            text-transform: lowercase; /* forces small letters */
+            font-weight: 500;
+        }
+        
+        /* The smaller inline visualizer */
+        #ring { 
+            width: 16px; 
+            height: 16px; 
+            border-radius: 50%; 
+            background: #d0d0d0; 
+            transition: transform 0.05s ease-out, background-color 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .success-text { color: #4CAF50 !important; font-weight: bold !important; }
+        .success-ring { background: #4CAF50 !important; transform: scale(1.3) !important; }
     </style>
 </head>
 <body>
 
-    <button id="start-btn">Enable Microphone</button>
-    <div id="ring" style="display: none;"></div>
-    <div id="status"></div>
+    <button id="start-btn">enable microphone</button>
+    
+    <div id="status-container">
+        <div id="ring"></div>
+        <div id="status">waiting for permission...</div>
+    </div>
 
     <script>
         const startBtn = document.getElementById('start-btn');
+        const statusContainer = document.getElementById('status-container');
         const statusText = document.getElementById('status');
         const ring = document.getElementById('ring');
         
@@ -49,8 +85,8 @@
                 stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
                 
                 startBtn.style.display = 'none';
-                ring.style.display = 'block';
-                statusText.textContent = "Calibrating room... Shhh 🤫";
+                statusContainer.style.display = 'flex'; // Show the inline UI
+                statusText.textContent = "calibrating room... shhh 🤫";
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const microphone = audioContext.createMediaStreamSource(stream);
@@ -67,60 +103,47 @@
                 function checkVolume() {
                     analyser.getByteFrequencyData(dataArray);
 
-                    // 1. ADVANCED AVERAGING
-                    // Average the first 3 bins (0-250Hz) for true wind rumble
                     let bassSum = 0;
                     for(let i = 0; i <= 2; i++) bassSum += dataArray[i];
                     const currentBass = bassSum / 3;
 
-                    // Average bins 15 to 30 (1.5kHz - 3kHz) for human voice / clapping
                     let trebleSum = 0;
                     for(let i = 15; i <= 30; i++) trebleSum += dataArray[i];
                     const currentTreble = trebleSum / 16;
 
-                    // 2. HARDWARE SETTLE & BASELINE CALIBRATION (1.2 seconds)
                     const elapsed = Date.now() - startTime;
                     if (elapsed < 1200) {
-                        // Slowly build a baseline of the room's normal background fan/hum noise
                         baselineBass = (baselineBass * 0.9) + (currentBass * 0.1);
-                        
-                        // Small visual feedback so they know mic is active
                         ring.style.transform = `scale(${1 + (currentTreble / 500)})`; 
-                        
                         animationId = requestAnimationFrame(checkVolume);
                         return;
                     }
 
-                    // Tell the user it's ready
-                    if (elapsed >= 1200 && statusText.textContent.includes("Calibrating")) {
-                        statusText.textContent = "Ready! Give it a sharp blow! 💨";
+                    if (elapsed >= 1200 && statusText.textContent.includes("calibrating")) {
+                        statusText.textContent = "ready! give it a strong, loud blow! 💨";
                     }
 
-                    // Make the ring pulse slightly to their background noise
-                    ring.style.transform = `scale(${1 + (currentBass / 300)})`;
+                    // Scale the tiny ring slightly based on breathing/noise
+                    ring.style.transform = `scale(${1 + (currentBass / 150)})`;
 
-                    // 3. THE 90% ACCURACY RULES:
-                    // Rule A: Must be a sudden spike (+50 above room baseline)
-                    const isSuddenSpike = currentBass > (baselineBass + 50);
-                    // Rule B: Must be exclusively wind (Bass is at least 50 points louder than Treble)
-                    const isExclusivelyWind = currentBass > (currentTreble + 50);
-                    // Rule C: Must be reasonably loud (Protects against ultra-quiet room glitches)
-                    const isLoudEnough = currentBass > 80;
+                    // --- STRICTER, LOUDER RULES ---
+                    // A: Spike must be massive (+80 above room noise)
+                    const isSuddenSpike = currentBass > (baselineBass + 80);
+                    // B: Must be exclusively wind (Bass +80 over Treble)
+                    const isExclusivelyWind = currentBass > (currentTreble + 80);
+                    // C: Must hit a much higher absolute volume (160 instead of 80)
+                    const isLoudEnough = currentBass > 160;
 
                     if (isSuddenSpike && isExclusivelyWind && isLoudEnough) {
                         consecutiveBlowFrames++; 
                         
-                        // Require this state for ~80ms (5 frames). 
-                        // Long enough to ignore desk bumps, short enough to catch quick puffs.
-                        if (consecutiveBlowFrames >= 5) {
+                        // Require 7 frames (~115ms) to ensure it's a deep, sustained blow, not a puff
+                        if (consecutiveBlowFrames >= 7) {
                             triggerSuccess();
                             return; 
                         }
                     } else {
-                        // Reset instantly if the air pressure drops
                         consecutiveBlowFrames = 0;
-                        
-                        // Keep adjusting the background noise floor if it gets quiet
                         if (currentBass < baselineBass + 20) {
                             baselineBass = (baselineBass * 0.98) + (currentBass * 0.02);
                         }
@@ -133,12 +156,12 @@
 
             } catch (err) {
                 console.error("Mic error:", err);
-                statusText.textContent = "Microphone access denied.";
+                statusText.textContent = "microphone access denied.";
             }
         });
 
         function triggerSuccess() {
-            statusText.textContent = "🎉 Nailed it! Blow Detected!";
+            statusText.textContent = "🎉 nailed it! strong blow detected!";
             statusText.classList.add('success-text');
             ring.classList.add('success-ring');
 
