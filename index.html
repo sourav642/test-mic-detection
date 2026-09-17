@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instant Blow Detection</title>
+    <title>Strict Blow Detection</title>
     <style>
         body { font-family: system-ui, sans-serif; text-align: center; margin-top: 20vh; }
         #status { font-size: 1.5rem; margin-top: 20px; font-weight: bold; color: #555; }
@@ -26,11 +26,10 @@
         let animationId;
         
         let consecutiveBlowFrames = 0;
-        let ambientBass = 0; // Tracks background noise silently
 
         startBtn.addEventListener('click', async () => {
             try {
-                // Ensure raw audio so the browser doesn't block the wind noise
+                // Must disable suppression so the browser doesn't block the clipping
                 const audioConstraints = {
                     audio: {
                         echoCancellation: false,
@@ -41,15 +40,14 @@
 
                 stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
                 
-                // INSTANT UX: Hide button, show immediate listening state
                 startBtn.style.display = 'none';
-                statusText.textContent = "Listening... Blow into the mic! 💨";
+                statusText.textContent = "Listening... Give it a SHARP, solid blow! 💨";
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const microphone = audioContext.createMediaStreamSource(stream);
                 const analyser = audioContext.createAnalyser();
                 
-                analyser.smoothingTimeConstant = 0.2; 
+                analyser.smoothingTimeConstant = 0.1; // Highly responsive
                 analyser.fftSize = 256; 
                 
                 microphone.connect(analyser);
@@ -58,30 +56,27 @@
                 function checkVolume() {
                     analyser.getByteFrequencyData(dataArray);
 
-                    const currentBass = dataArray[0]; 
-                    const highFreq = dataArray[20]; 
+                    const currentBass = dataArray[0]; // Deep rumble
+                    const highFreq = dataArray[20];   // High pitch (voice/noise)
 
-                    // 1. Is it a sudden spike above the invisible background noise?
-                    const isSpike = currentBass > (ambientBass + 60);
-                    // 2. Is it loud enough to be a deliberate blow?
-                    const isLoud = currentBass > 120;
-                    // 3. Is it mostly wind? (Bass significantly higher than pitch)
-                    const isWind = (currentBass - highFreq) > 50;
+                    // STRICT RULES:
+                    // 1. Max volume is 255. A sharp blow must overload the mic (> 230).
+                    // 2. High frequencies must stay relatively quiet (< 100), meaning they aren't yelling.
+                    const isExtremeClipping = currentBass > 230;
+                    const isNotYelling = highFreq < 100;
 
-                    if (isSpike && isLoud && isWind) {
+                    if (isExtremeClipping && isNotYelling) {
                         consecutiveBlowFrames++; 
                         
-                        // Require ~130ms of continuous blowing
-                        if (consecutiveBlowFrames > 8) {
+                        // Require this max-volume state to hold for ~100 milliseconds (6 frames)
+                        // This prevents quick pops or hitting the desk from triggering it.
+                        if (consecutiveBlowFrames > 6) {
                             triggerSuccess();
                             return; 
                         }
                     } else {
+                        // The moment the pressure drops, reset to 0
                         consecutiveBlowFrames = 0;
-                        
-                        // If no blow is happening, constantly update the ambient room noise.
-                        // This absorbs fan noise in fractions of a second invisibly.
-                        ambientBass = (ambientBass * 0.95) + (currentBass * 0.05);
                     }
 
                     animationId = requestAnimationFrame(checkVolume);
@@ -96,7 +91,7 @@
         });
 
         function triggerSuccess() {
-            statusText.textContent = "🎉 Blow Detected!";
+            statusText.textContent = "🎉 Solid Blow Detected!";
             statusText.classList.add('success');
 
             cancelAnimationFrame(animationId);
